@@ -1,2 +1,6 @@
 images/*
 texts/*
+BERT_LSTM_weights_0.84.hdf5
+early_fusion_weights_0.92.hdf5
+inception_model_weights_0.72.hdf5
+late_fusion_weights_0.85.hdf5

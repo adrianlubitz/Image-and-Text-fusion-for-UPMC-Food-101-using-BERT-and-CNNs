@@ -1,3 +1,11 @@
 tensorflow
+tensorflow-gpu
 tensorflow_hub
 pandas
+jupyter
+opencv-python
+numpy
+bert-for-tf2
+matplotlib
+sklearn
+pydot
