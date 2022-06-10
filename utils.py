@@ -23,7 +23,7 @@ from sklearn.utils import shuffle
 __author__      = 'Adrian Lubitz'
 
 class Data():
-    def __init__(self, test_path='texts/test_titles.csv', train_path='texts/train_titles.csv', load='test') -> None:
+    def __init__(self, test_path='texts/test_titles.csv', train_path='texts/train_titles.csv', load='both') -> None:
 
         # Parameters setting: images width and height, depth, number if classes, input shape
         self.batch_size =  80
@@ -46,8 +46,8 @@ class Data():
             raise ValueError(f'load must be one of {pos_load}')
 
 
-        self.nClasses = self.test.food.nunique()
-        self.Classes = self.test.food.unique()
+        self.nClasses = self.train.food.nunique()
+        self.Classes = self.train.food.unique()
         self.input_shape = (self.img_width, self.img_height, self.depth)
         self.vec_load_image = np.vectorize(self.load_image, signature = '()->(r,c,d),(s)')
         self.vec_get_text = np.vectorize(self.get_texts)
@@ -245,12 +245,12 @@ class Data():
     # Images loading using tf.data
     def tf_data(self, path, batch_size=None):
         if batch_size is None:
-            batch_size = self.batch_size
+            batch_size = self.test.shape[0]
         paths = tf.data.Dataset.list_files(path)
         paths = paths.batch(64)
         dataset = paths.map(self.prepare_data, tf.data.experimental.AUTOTUNE)
         dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
         dataset = dataset.unbatch()
         dataset = dataset.batch(batch_size)
-        dataset = dataset.repeat()
+        # dataset = dataset.repeat()
         return dataset   
