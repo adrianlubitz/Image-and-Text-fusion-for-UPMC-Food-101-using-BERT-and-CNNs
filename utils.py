@@ -8,11 +8,13 @@ import re
 import glob
 # 3rd party imports
 import tensorflow as tf
+from sklearn.preprocessing import LabelEncoder
 import cv2
 import numpy as np
 import pandas as pd
 import bert
 import tensorflow_hub as hub
+from tensorflow.keras import utils
 from sklearn.utils import shuffle
 
 
@@ -21,16 +23,147 @@ from sklearn.utils import shuffle
 
 # end file header
 __author__      = 'Adrian Lubitz'
+class TextData():
+    def __init__(self, test_path='texts/test_titles.csv', train_path='texts/train_titles.csv', load='both', text_length=40) -> None:
+        pos_load = ['test', 'train', 'both']
+        self.colnames=['image_path', 'text', 'food']
+        self.max_length = text_length # that must be set according to your dataset
+                # Import the BERT BASE model from Tensorflow HUB (layer, vocab_file and tokenizer)
+        BertTokenizer = bert.bert_tokenization.FullTokenizer
+        bert_layer = hub.KerasLayer("https://tfhub.dev/tensorflow/bert_en_uncased_L-12_H-768_A-12/1",
+                                    trainable=False)
+        vocabulary_file = bert_layer.resolved_object.vocab_file.asset_path.numpy()
+        to_lower_case = bert_layer.resolved_object.do_lower_case.numpy()
+        self.tokenizer = BertTokenizer(vocabulary_file, to_lower_case)
+        self.vec_get_masks = np.vectorize(self.get_masks, signature = '(),()->(n)')
+        self.vec_get_segments = np.vectorize(self.get_segments, signature = '(),()->(n)')
+        self.vec_get_ids = np.vectorize(self.get_ids, signature = '(),(),()->(n)')
+        self.TAG_RE = re.compile(r'<[^>]+>')
+        encoder = LabelEncoder()
+        self.vec_preprocess_text = np.vectorize(self.preprocess_text)
+        if load == 'train' or load == 'both':
+            self.train = pd.read_csv(train_path, names=self.colnames, header=None, sep = ',', index_col=['image_path'])
+            
+            self.train = self.train.sort_values('image_path')
+            self.nClasses = self.train.food.nunique()
+            processed_train = self.vec_preprocess_text(self.train.text.values)
+            encoded_labels_train = encoder.fit_transform(self.train.food.values)
+            self.labels_train = utils.to_categorical(encoded_labels_train, self.nClasses)
+            self.ids_train, self.segments_train, self.masks_train = self.prepare(processed_train,
+                                                        self.tokenizer,
+                                                        self.max_length)
+        if load == 'test' or load == 'both':
+            self.test = pd.read_csv(test_path, names=self.colnames, header=None, sep = ',', index_col=['image_path'])
+            self.test = self.test.sort_values('image_path')
+            processed_test = self.vec_preprocess_text(self.test.text.values)
+            encoded_labels_test = encoder.fit_transform(self.test.food.values)
+            self.labels_test = utils.to_categorical(encoded_labels_test, self.nClasses)
+            self.ids_test, self.segments_test, self.masks_test = self.prepare(processed_test, 
+                                               self.tokenizer,
+                                               self.max_length)
+        if load not in pos_load:
+            raise ValueError(f'load must be one of {pos_load}')
+        # Sort values by 'image_path'
+        
 
-class Data():
-    def __init__(self, test_path='texts/test_titles.csv', train_path='texts/train_titles.csv', load='both') -> None:
+        
+        
+        
+
+
+        
+
+       
+
+
+
+        
+    def get_masks(self, text, max_length):
+        """Mask for padding"""
+        tokens = self.tokenizer.tokenize(text)
+        tokens = ["[CLS]"] + tokens + ["[SEP]"]
+        length = len(tokens)
+        if length > max_length:
+            tokens = tokens[:max_length]
+
+        return np.asarray([1]*len(tokens) + [0] * (max_length - len(tokens)))
+    
+
+    def get_segments(self, text, max_length):
+        """Segments: 0 for the first sequence, 1 for the second"""
+        tokens = self.tokenizer.tokenize(text)
+        tokens = ["[CLS]"] + tokens + ["[SEP]"]
+        length = len(tokens)
+        if length > max_length:
+            tokens = tokens[:max_length]
+        
+        segments = []
+        current_segment_id = 0
+        with_tags = ["[CLS]"] + tokens + ["[SEP]"]
+        token_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+        
+        for token in tokens:
+            segments.append(current_segment_id)
+            if token == "[SEP]":
+                current_segment_id = 1
+        return np.asarray(segments + [0] * (max_length - len(tokens)))
+
+    def get_ids(self, text, tokenizer, max_length):
+        """Token ids from Tokenizer vocab"""
+        tokens = tokenizer.tokenize(text)
+        tokens = ["[CLS]"] + tokens + ["[SEP]"]
+        length = len(tokens)
+        if length > max_length:
+            tokens = tokens[:max_length]
+
+        token_ids = tokenizer.convert_tokens_to_ids(tokens)
+        input_ids = np.asarray(token_ids + [0] * (max_length-length))
+        return input_ids
+
+
+    def prepare(self, text_array, tokenizer, max_length = 128):
+        
+        ids = self.vec_get_ids(text_array, 
+                        tokenizer, 
+                        max_length).squeeze()
+        masks = self.vec_get_masks(text_array,
+                        max_length).squeeze()
+        segments = self.vec_get_segments(text_array,
+                        max_length).squeeze()
+
+        return ids, segments, masks
+
+    def preprocess_text(self, sen):
+        # Removing html tags
+        sentence = self.remove_tags(sen)
+
+        # Remove punctuations and numbers
+        sentence = re.sub('[^a-zA-Z]', ' ', sentence)
+
+        # Single character removal
+        sentence = re.sub(r"\s+[a-zA-Z]\s+", ' ', sentence)
+
+        # Removing multiple spaces
+        sentence = re.sub(r'\s+', ' ', sentence)
+
+        sentence = sentence.lower()
+
+        return sentence
+
+    def remove_tags(self, text):
+        return self.TAG_RE.sub('', text)
+
+
+            
+class FusedData():
+    def __init__(self, test_path='texts/test_titles.csv', train_path='texts/train_titles.csv', load='test', text_length=20) -> None:
 
         # Parameters setting: images width and height, depth, number if classes, input shape
         self.batch_size =  80
         self.img_width = 299
         self.img_height = 299
         self.depth = 3
-        self.max_length = 20 #Setup according to the text
+        self.max_length = text_length #Setup according to the text
         self.vec_get_missing = np.vectorize(self.get_missing, signature='(),(m,n)->(),(),()')  
         pos_load = ['test', 'train', 'both']
         self.colnames=['image_path', 'text', 'food']
@@ -38,16 +171,19 @@ class Data():
             self.train = pd.read_csv(train_path, names=self.colnames, header=None, sep = ',', index_col=['image_path'])
             self.train = self.train.sort_values('image_path')
             self.train = self.add_not_found('images/train/*/*.jpg', self.train)
+            self.nClasses = self.train.food.nunique()
+            self.Classes = self.train.food.unique()
         if load == 'test' or load == 'both':
             self.test = pd.read_csv(test_path, names=self.colnames, header=None, sep = ',', index_col=['image_path'])
             self.test = self.test.sort_values('image_path')
             self.test = self.add_not_found('images/test/*/*.jpg', self.test)
+            self.nClasses = 101
+            self.Classes = np.load('Classes.npy', allow_pickle=True)
         if load not in pos_load:
             raise ValueError(f'load must be one of {pos_load}')
 
 
-        self.nClasses = self.train.food.nunique()
-        self.Classes = self.train.food.unique()
+
         self.input_shape = (self.img_width, self.img_height, self.depth)
         self.vec_load_image = np.vectorize(self.load_image, signature = '()->(r,c,d),(s)')
         self.vec_get_text = np.vectorize(self.get_texts)
