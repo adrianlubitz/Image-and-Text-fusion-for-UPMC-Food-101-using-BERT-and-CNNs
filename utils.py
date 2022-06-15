@@ -46,6 +46,7 @@ class TextData():
             
             self.train = self.train.sort_values('image_path')
             self.nClasses = self.train.food.nunique()
+            self.Classes = self.train.food.unique()
             processed_train = self.vec_preprocess_text(self.train.text.values)
             encoded_labels_train = encoder.fit_transform(self.train.food.values)
             self.labels_train = utils.to_categorical(encoded_labels_train, self.nClasses)
@@ -55,6 +56,8 @@ class TextData():
         if load == 'test' or load == 'both':
             self.test = pd.read_csv(test_path, names=self.colnames, header=None, sep = ',', index_col=['image_path'])
             self.test = self.test.sort_values('image_path')
+            self.nClasses = 101
+            self.Classes = np.load('Classes.npy', allow_pickle=True)
             processed_test = self.vec_preprocess_text(self.test.text.values)
             encoded_labels_test = encoder.fit_transform(self.test.food.values)
             self.labels_test = utils.to_categorical(encoded_labels_test, self.nClasses)
